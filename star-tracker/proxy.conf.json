@@ -1,0 +1,8 @@
+{
+  "/steps/*": {
+    "target": "http://localhost:3900",
+    "secure": false,
+    "logLevel": "debug",
+    "changeOrigin": true
+  }
+}

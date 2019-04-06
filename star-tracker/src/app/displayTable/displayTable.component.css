@@ -1,0 +1,22 @@
+table {
+  width: 100%;
+  background :black;
+}
+
+.mat-form-field {
+  font-size: 14px;
+  width: 100%;
+}
+
+.mat-cell {
+    color: white;
+    border-color: blue;
+}
+
+.mat-header-cell {
+    color: red; 
+    font-weight: bold;
+    font-size: 16px;
+    line-height: normal; 
+    border-color: white;
+}
