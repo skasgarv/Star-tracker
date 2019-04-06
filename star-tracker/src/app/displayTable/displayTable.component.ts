@@ -1,32 +1,35 @@
-import {Component} from "@angular/core";
+import {Component, ViewChild} from "@angular/core";
 import {animate, state, style, transition, trigger} from "@angular/animations";
+import {MatTableDataSource} from '@angular/material';
+import { HttpClient, HttpHeaders } from '@angular/common/http';
 import {DisplayTableService} from "./displayTable.service";
 import {Stars} from "./stars.interface";
+
 
 @Component({
     selector: "display-table",
     templateUrl: "./displayTable.component.html",
-    styleUrls: ["./displayTable.component.css"],
-    animations: [
-        trigger("detailExpand", [
-            state("collapsed", style({height: "0px", minHeight: "0", display: "none"})),
-            state("expanded", style({height: "*"})),
-            transition("expanded <=> collapsed", animate("225ms cubic-bezier(0.4, 0.0, 0.2, 1)")),
-        ]),
-    ],
+    styleUrls: ["./displayTable.component.css"]
 })
 
 export class DisplayTableComponent {
-    constructor(private displayTableService: DisplayTableService) {
+    displayedColumns: string[] = ['Constellation', 'Star', "Launch"];
+    dataSource = new MatTableDataSource(this.displayTableService.getStarData());
+    applyFilter(filterValue: string) {
+        this.dataSource.filter = filterValue.trim().toLowerCase();
     }
-
-    columnsToDisplay = ["Constellation", "Star", "Launch"];
     currentDate = new Date();
-    expandedElement: Stars | null;
     latitude = 0;
     longitude = 0;
-    tableData = this.displayTableService.getStarData();
+    azimuth = 0;
+    altitude = 0;
+    
+    constructor(private displayTableService: DisplayTableService,
+        private httpClient: HttpClient) {
+        this.getLocation();
+    }
 
+    
     /**
      * Calculates the Azimuth and Altitude and calls another function to
      * decide the number of steps stepper motor has to turn
@@ -34,18 +37,24 @@ export class DisplayTableComponent {
      * @param declination of a star in degrees
      */
     findObject(rightAscension, declination) {
-        const rightAscensionSplit = rightAscension.split(" ");
-        const rightAscensionInDegrees = 15 *
-            // (parseInt(rightAscensionSplit[0]) + (parseInt(rightAscensionSplit[2])/60));
-            (parseInt(rightAscensionSplit[0].split("h")[0]) +
-                (rightAscensionSplit[1].split("m")[0] / 60));
+        /**
+         * Save previous Azimuth and Altitude of a star for hopping
+         */
+        const previousAzimuth = this.azimuth;
+        const previousAltitude = this.altitude;
 
+        /**
+         * Calculate RightAscension of a star in degrees
+         */
+        const rightAscensionInDegrees = 15 * (parseInt(rightAscension.h) + (parseInt(rightAscension.m)/60));
+
+        /**
+         * Number of days to the current date from year 2000
+         */
         const daysFrom2000 = Math.round((this.currentDate.getTime() - new Date(2000,1,1).getTime())/
             (24*60*60*1000));
 
-        const universalTime = this.currentDate.getHours() + this.currentDate.getMinutes() / 60;
-        this.getLocation();
-
+        
         /**
          * Suppose you have a sunny morning. Put a stick in the ground, and watch
          * the shadow. The shadow will get shorter and shorter - and then start to
@@ -67,20 +76,19 @@ export class DisplayTableComponent {
          *      UT = universal time in decimal hours
          *      long = your longitude in decimal degrees, East positive.
          */
+        const universalTime = this.currentDate.getHours() + (this.currentDate.getMinutes() / 60);
         let localSiderealTime = 100.46 + (0.985647 * daysFrom2000) + this.longitude + (15 * universalTime);
         let numberOf360sToBeAdded = Math.ceil(Math.abs(localSiderealTime/360));
 
         if (localSiderealTime < 0) {
             localSiderealTime = localSiderealTime + numberOf360sToBeAdded*360;
         }
-        if (localSiderealTime < 0 || localSiderealTime > 360) {
-            if (localSiderealTime > 0) {
-                numberOf360sToBeAdded -=1;
-            }
+        if (localSiderealTime > 0) {
+            numberOf360sToBeAdded -=1;
             localSiderealTime = localSiderealTime - (360*numberOf360sToBeAdded);
         }
-
-        let hourAngle = localSiderealTime - rightAscensionInDegrees;
+       
+        let hourAngle = (localSiderealTime - rightAscensionInDegrees)/15;
         if (hourAngle <= 0) {
             hourAngle += 360;
         }
@@ -98,18 +106,24 @@ export class DisplayTableComponent {
          *  If sin(HA) is negative, then AZ = A, otherwise
          *  AZ = 360 - A
          */
-        const sineAltitude = (Math.sin((declination * 3.14) / 180) * Math.sin((this.latitude * 3.14) / 180)) +
-            (Math.cos((declination * 3.14) / 180) * Math.cos((this.latitude * 3.14) / 180) *
+        const sineAltitude = (Math.sin((parseFloat(declination) * 3.14) / 180) * Math.sin((this.latitude * 3.14) / 180)) +
+            (Math.cos((parseFloat(declination) * 3.14) / 180) * Math.cos((this.latitude * 3.14) / 180) *
                 Math.cos((hourAngle * 3.14) / 180));
-        const altitude = (Math.asin(sineAltitude) * 180) / Math.PI;
+        this.altitude = (Math.asin(sineAltitude) * 180) / Math.PI;
 
-        const cosA = (Math.sin((declination * 3.14) / 180) - (Math.sin((altitude * 3.14) / 180)) *
+        const cosA = (Math.sin(((parseFloat(declination) * 3.14) / 180) - (Math.sin((this.altitude * 3.14) / 180)) *
             Math.sin((this.latitude * 3.14) / 180)) /
-            (Math.cos((altitude * 3.14) / 180) * Math.cos((this.latitude * 3.14) / 180));
-        let azimuth = (Math.acos(cosA) * 180) / Math.PI;
+            (Math.cos((this.altitude * 3.14) / 180) * Math.cos((this.latitude * 3.14) / 180)));
+        this.azimuth = (Math.acos(cosA) * 180) / Math.PI;
 
         if (Math.sin((hourAngle * 3.14) / 180) > 0) {
-            azimuth = 360 - azimuth;
+            this.azimuth = 360 - this.azimuth;
+        }
+
+        if (this.altitude >= 0) {
+            this.calculateDifferenceInDegrees(previousAltitude, this.altitude, previousAzimuth, this.azimuth);
+        } else {
+            alert("Selected object below horizon. Please select another object.");
         }
     }
 
@@ -120,6 +134,7 @@ export class DisplayTableComponent {
         if (navigator.geolocation) {
             navigator.geolocation.getCurrentPosition((position: Position) => {
                     if (position) {
+                        console.log("Position", position)
                         this.latitude = position.coords.latitude;
                         this.longitude = position.coords.longitude;
                     }
@@ -128,6 +143,25 @@ export class DisplayTableComponent {
         } else {
             alert("Geolocation is not supported by this browser.");
         }
+    }
+
+    calculateDifferenceInDegrees(previousAltitude, currentAltitude, previousAzimuth, currentAzimuth) {
+        const differenceInAzimuth = currentAzimuth - previousAzimuth;
+        const differenceInAltitude = currentAltitude - previousAltitude;
+        const numberOfStepperMotorSteps = 2048;
+        const minimumDegreeOfRotationOfMotor = 360/numberOfStepperMotorSteps;
+
+
+        const numberOfStepsForAzimuthMotor = Math.ceil(differenceInAzimuth/minimumDegreeOfRotationOfMotor);
+        const numberOfStepsForAltitudeMotor = Math.ceil(differenceInAltitude/minimumDegreeOfRotationOfMotor);
+         console.log("numberOfStepsForAzimuthMotor", numberOfStepsForAzimuthMotor);
+        console.log("numberOfStepsForAltitudeMotor", numberOfStepsForAltitudeMotor);
+        const httpOptions = {
+            headers: new HttpHeaders({ 
+                'Access-Control-Allow-Origin':'*'
+            })
+        };
+        return this.httpClient.post(`/steps?azimuthMotorSteps=${numberOfStepsForAzimuthMotor}?altitudeMotorSteps=${numberOfStepsForAltitudeMotor}`, {}, httpOptions).subscribe();       
     }
 
 }
